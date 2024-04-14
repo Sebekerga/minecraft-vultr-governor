@@ -3,20 +3,24 @@ package create_server
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	mcvultrgov "sebekerga/vultr_minecraft_governor"
 	routines "sebekerga/vultr_minecraft_governor/routines"
 	"strconv"
+	"time"
 
 	"github.com/melbahja/goph"
 	"github.com/vultr/govultr/v3"
 )
 
+const MAX_ATTEMPTS = 5
+
 type CreatingServerContext struct {
 	VCtx        context.Context
 	VultrClient *govultr.Client
 
-	SSHClient goph.Client
+	SSHClient *goph.Client
 
 	TargetInstanceLabel  string
 	TargetInstanceRegion string
@@ -26,7 +30,10 @@ type CreatingServerContext struct {
 	TargetBlockLabel     string
 
 	CreatedInstanceID string
+	CreatedInstanceIP string
 	TargetBlockID     string
+
+	AttemptCount int
 }
 
 func InitContext(vultrContext context.Context, vultrClient *govultr.Client) CreatingServerContext {
@@ -45,6 +52,8 @@ func InitContext(vultrContext context.Context, vultrClient *govultr.Client) Crea
 		TargetInstanceOSID:   instance_os_id,
 		TargetScriptID:       os.Getenv(mcvultrgov.TARGET_SCRIPT_ID_KEY),
 		TargetBlockLabel:     os.Getenv(mcvultrgov.TARGET_BLOCK_LABEL_KEY),
+
+		AttemptCount: 0,
 	}
 }
 
@@ -65,6 +74,7 @@ func _CheckIfInstanceCreated(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	for _, instance := range instances {
 		if instance.Label == ctx.TargetInstanceLabel {
 			ctx.CreatedInstanceID = instance.ID
+			ctx.CreatedInstanceIP = instance.MainIP
 			ph(routines.INFO, fmt.Sprintf("Found existing instance, ID: %s", ctx.CreatedInstanceID))
 			return _FindBlockStorage, nil
 		}
@@ -88,6 +98,7 @@ func _CreateInstance(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 		return nil, err
 	}
 	ctx.CreatedInstanceID = instance.ID
+	ctx.CreatedInstanceIP = instance.MainIP
 	ph(routines.INFO, fmt.Sprintf("Instance created, ID: %s", ctx.CreatedInstanceID))
 
 	return _FindBlockStorage, nil
@@ -105,7 +116,7 @@ func _FindBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 		if block.Label == ctx.TargetBlockLabel {
 			ctx.TargetBlockID = block.ID
 			ph(routines.INFO, fmt.Sprintf("Found existing block storage, ID: %s", ctx.TargetBlockID))
-			return nil, nil
+			return _AwaitServerSSH, nil
 		}
 	}
 
@@ -126,17 +137,72 @@ func _CreateBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	ctx.TargetBlockID = block.ID
 	ph(routines.INFO, fmt.Sprintf("Block storage created, ID: %s", ctx.TargetBlockID))
 
-	return nil, nil
+	return _AwaitServerSSH, nil
 }
 
-// func _AttachBlockStorage(ctx *C) (F, error) {
-// 	_, _, err := ctx.VultrClient.BlockStorage.Attach(ctx.VCtx, ctx.TargetBlockID, &govultr.BlockStorageAttach{
-// 		InstanceID: ctx.CreatedInstanceID,
-// 		Live:       govultr.Bool(true),
-// 	})
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func _AwaitServerSSH(ctx *Ctx, ph routines.PrintHandler) (F, error) {
+	if ctx.AttemptCount <= 0 {
+		ph(routines.INFO, fmt.Sprintf("Waiting for server SSH, IP: %s", ctx.CreatedInstanceIP))
+	}
 
-// 	return nil, nil
-// }
+	keyPath := os.Getenv(mcvultrgov.INSTANCE_SSH_KEY_PATH_KEY)
+	auth, err := goph.Key(keyPath, "")
+	if err != nil {
+		ph(routines.ERROR, "Unable to get SSH key")
+		return nil, err
+	}
+	ph(routines.INFO, "Loaded key")
+
+	// I cant know host key before server is booted
+	sshClient, err := goph.NewUnknown("root", ctx.CreatedInstanceIP, auth)
+	if err != nil {
+		ph(routines.INFO, fmt.Sprintf("Attempt %d: Server not booted yet", ctx.AttemptCount+1))
+		log.Printf("Error: %s", err)
+		ctx.AttemptCount++
+		if ctx.AttemptCount >= MAX_ATTEMPTS {
+			ph(routines.ERROR, "Max attempts reached")
+			return nil, err
+		}
+		time.Sleep(10 * time.Second)
+		return _AwaitServerSSH, nil
+	}
+
+	ctx.SSHClient = sshClient
+
+	ph(routines.INFO, "SSH connection established")
+	ctx.AttemptCount = 0
+	return _AttachBlockStorage, nil
+}
+
+func _AttachBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
+	ph(routines.INFO, "Attaching block storage")
+	err := ctx.VultrClient.BlockStorage.Attach(ctx.VCtx, ctx.TargetBlockID, &govultr.BlockStorageAttach{
+		InstanceID: ctx.CreatedInstanceID,
+		Live:       govultr.BoolToBoolPtr(true),
+	})
+	if err != nil {
+		ph(routines.ERROR, "Error occurred while attaching block storage")
+		return nil, err
+	}
+	ph(routines.INFO, "Block storage attached")
+
+	return _MountingBlockStorage, nil
+}
+
+func _MountingBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
+	_, err := ctx.SSHClient.Run("mkdir /mnt/minecraft")
+	if err != nil {
+		ph(routines.ERROR, "Error occurred while creating directory")
+		return nil, err
+	}
+	ph(routines.INFO, "Directory created")
+
+	_, err = ctx.SSHClient.Run("mount /dev/sda /mnt/minecraft")
+	if err != nil {
+		ph(routines.ERROR, "Error occurred while mounting block storage")
+		return nil, err
+	}
+	ph(routines.INFO, "Block storage mounted")
+
+	return nil, nil
+}
