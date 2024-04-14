@@ -7,12 +7,15 @@ import (
 	"sebekerga/vultr_minecraft_governor/routines"
 	"strconv"
 
+	"github.com/melbahja/goph"
 	"github.com/vultr/govultr/v3"
 )
 
 type CreatingServerContext struct {
 	VCtx        context.Context
 	VultrClient *govultr.Client
+
+	SSHClient goph.Client
 
 	TargetInstanceLabel  string
 	TargetInstanceRegion string
@@ -25,7 +28,7 @@ type CreatingServerContext struct {
 	TargetBlockID     string
 }
 
-func InitContext(vultrContext context.Context, vultrClient *govultr.Client) CreatingServerContext {
+func InitContext(vultrContext context.Context, vultrClient *govultr.Client, sshClient goph.Client) CreatingServerContext {
 	instance_os_id, err := strconv.Atoi(os.Getenv(mcvultrgov.TARGET_INSTANCE_OS_ID_KEY))
 	if err != nil {
 		panic(err)
@@ -34,6 +37,8 @@ func InitContext(vultrContext context.Context, vultrClient *govultr.Client) Crea
 	return CreatingServerContext{
 		VCtx:        vultrContext,
 		VultrClient: vultrClient,
+
+		SSHClient: sshClient,
 
 		TargetInstanceLabel:  os.Getenv(mcvultrgov.TARGET_INSTANCE_LABEL_KEY),
 		TargetInstanceRegion: os.Getenv(mcvultrgov.TARGET_INSTANCE_REGION_KEY),
