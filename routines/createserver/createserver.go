@@ -2,6 +2,7 @@ package create_server
 
 import (
 	"context"
+	"fmt"
 	"os"
 	mcvultrgov "sebekerga/vultr_minecraft_governor"
 	routines "sebekerga/vultr_minecraft_governor/routines"
@@ -51,12 +52,10 @@ type Ctx = CreatingServerContext
 type F = routines.RoutineFunc[Ctx]
 
 func CreatingServerEntry(ctx *Ctx, ph routines.PrintHandler) (F, error) {
-	ph(routines.INFO, "Starting up server creation routine")
 	return _CheckIfInstanceCreated, nil
 }
 
 func _CheckIfInstanceCreated(ctx *Ctx, ph routines.PrintHandler) (F, error) {
-	ph(routines.INFO, "Checking if instance already created")
 	instances, _, _, err := ctx.VultrClient.Instance.List(ctx.VCtx, &govultr.ListOptions{})
 	if err != nil {
 		ph(routines.ERROR, "Error occurred while fetching instances")
@@ -66,7 +65,7 @@ func _CheckIfInstanceCreated(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	for _, instance := range instances {
 		if instance.Label == ctx.TargetInstanceLabel {
 			ctx.CreatedInstanceID = instance.ID
-			ph(routines.INFO, "Found existing instance, ID: "+ctx.CreatedInstanceID)
+			ph(routines.INFO, fmt.Sprintf("Found existing instance, ID: %s", ctx.CreatedInstanceID))
 			return _FindBlockStorage, nil
 		}
 	}
@@ -89,7 +88,7 @@ func _CreateInstance(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 		return nil, err
 	}
 	ctx.CreatedInstanceID = instance.ID
-	ph(routines.INFO, "Instance created, ID: "+ctx.CreatedInstanceID)
+	ph(routines.INFO, fmt.Sprintf("Instance created, ID: %s", ctx.CreatedInstanceID))
 
 	return _FindBlockStorage, nil
 }
@@ -105,7 +104,7 @@ func _FindBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	for _, block := range blocks {
 		if block.Label == ctx.TargetBlockLabel {
 			ctx.TargetBlockID = block.ID
-			ph(routines.INFO, "Found existing block storage, ID: "+ctx.TargetBlockID)
+			ph(routines.INFO, fmt.Sprintf("Found existing block storage, ID: %s", ctx.TargetBlockID))
 			return nil, nil
 		}
 	}
@@ -125,7 +124,7 @@ func _CreateBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 		return nil, err
 	}
 	ctx.TargetBlockID = block.ID
-	ph(routines.INFO, "Block storage created, ID: "+ctx.TargetBlockID)
+	ph(routines.INFO, fmt.Sprintf("Block storage created, ID: %s", ctx.TargetBlockID))
 
 	return nil, nil
 }
