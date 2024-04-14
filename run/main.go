@@ -29,14 +29,14 @@ func main() {
 		log.Fatal("Error loading .env file: ", err)
 	}
 
-	tg_token := os.Getenv(mc_vultr_gov.TELEGRAM_TOKEN_KEY)
-	bot_id := strings.Split(tg_token, ":")[0]
-	obfuscated_token := strings.Repeat("*", len(tg_token)-len(bot_id)-1)
+	tgToken := os.Getenv(mc_vultr_gov.TELEGRAM_TOKEN_KEY)
+	botId := strings.Split(tgToken, ":")[0]
+	obfuscatedToken := strings.Repeat("*", len(tgToken)-len(botId)-1)
 
-	log.Printf("Token: %s:%s", bot_id, obfuscated_token)
+	log.Printf("Token: %s:%s", botId, obfuscatedToken)
 
 	pref := tele.Settings{
-		Token:  tg_token,
+		Token:  tgToken,
 		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
 	}
 
@@ -53,8 +53,17 @@ func main() {
 	vultrClient := govultr.NewClient(oauth2.NewClient(ctx, ts))
 
 	b.Handle("/create", func(c tele.Context) error {
-		create_ctx := routines_create.InitContext(ctx, vultrClient)
-		routine := routines.InitRoutine[routines_create.Ctx](routines_create.CreatingServerEntry, create_ctx)
+		printHandler := func(level routines.PrintLevel, message string) {
+			switch level {
+			case routines.INFO:
+				c.Reply(message)
+			case routines.ERROR:
+				c.Reply(message)
+			}
+		}
+
+		creationCtx := routines_create.InitContext(ctx, vultrClient)
+		routine := routines.InitRoutine[routines_create.Ctx](routines_create.CreatingServerEntry, creationCtx, printHandler)
 
 		for !routine.Finished() {
 			log.Print("Running routine step", GetFunctionName(routine.QueuedFunction))

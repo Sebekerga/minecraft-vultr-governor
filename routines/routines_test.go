@@ -5,55 +5,59 @@ import (
 	"testing"
 )
 
+func printHandler(level PrintLevel, message string) {
+	fmt.Println("["+level.String()+"]", message)
+}
+
 type EmptyContext struct{}
 
-func StepA(ctx *EmptyContext) (RoutineFunc[EmptyContext], error) {
-	fmt.Println("╰-Step A")
+func StepA(ctx *EmptyContext, ph PrintHandler) (RoutineFunc[EmptyContext], error) {
+	ph(INFO, "╰-Step A")
 	return nil, nil
 }
 
 func TestSimpleRoutine(t *testing.T) {
 
-	routine := InitRoutine(StepA, EmptyContext{})
-	fmt.Println("Running simple routine")
+	routine := InitRoutine(StepA, EmptyContext{}, printHandler)
+	printHandler(INFO, "Running simple routine")
 	err := routine.Run()
 	if err != nil {
 		t.Error(err)
 	}
 }
 
-func AdvancedStepA(ctx *EmptyContext) (RoutineFunc[EmptyContext], error) {
-	fmt.Println("╰-Advanced Step A")
+func AdvancedStepA(ctx *EmptyContext, ph PrintHandler) (RoutineFunc[EmptyContext], error) {
+	ph(INFO, "╰-Advanced Step A")
 	return AdvancedStepB, nil
 }
 
-func AdvancedStepB(ctx *EmptyContext) (RoutineFunc[EmptyContext], error) {
-	fmt.Println("╰-Advanced Step B")
+func AdvancedStepB(ctx *EmptyContext, ph PrintHandler) (RoutineFunc[EmptyContext], error) {
+	ph(INFO, "╰-Advanced Step B")
 	return nil, nil
 }
 
 func TestAdvancedRoutine(t *testing.T) {
-	routine := InitRoutine(AdvancedStepA, EmptyContext{})
-	fmt.Println("Running advanced routine")
+	routine := InitRoutine(AdvancedStepA, EmptyContext{}, printHandler)
+	printHandler(INFO, "Running advanced routine")
 	err := routine.Run()
 	if err != nil {
 		t.Error(err)
 	}
 }
 
-func WithErrorStepA(ctx *EmptyContext) (RoutineFunc[EmptyContext], error) {
-	fmt.Println("╰-With Error Step A")
+func WithErrorStepA(ctx *EmptyContext, ph PrintHandler) (RoutineFunc[EmptyContext], error) {
+	ph(INFO, "╰-With Error Step A")
 	return WithErrorStepB, nil
 }
 
-func WithErrorStepB(ctx *EmptyContext) (RoutineFunc[EmptyContext], error) {
-	fmt.Println("╰-With Error Step B (should fail)")
+func WithErrorStepB(ctx *EmptyContext, ph PrintHandler) (RoutineFunc[EmptyContext], error) {
+	ph(INFO, "╰-With Error Step B (should fail)")
 	return nil, fmt.Errorf("Error in step B")
 }
 
 func TestRoutineWithError(t *testing.T) {
-	routine := InitRoutine(WithErrorStepA, EmptyContext{})
-	fmt.Println("Running routine with error")
+	routine := InitRoutine(WithErrorStepA, EmptyContext{}, printHandler)
+	printHandler(INFO, "Running routine with error")
 	err := routine.Run()
 	if err == nil {
 		t.Error("Expected error, got nil")
@@ -67,10 +71,10 @@ type ContextWithValue struct {
 	counter int16
 }
 
-func WithContextLoopStep(ctx *ContextWithValue) (RoutineFunc[ContextWithValue], error) {
-	fmt.Println("╰-With Context Step A for counter: ", ctx.counter)
+func WithContextLoopStep(ctx *ContextWithValue, ph PrintHandler) (RoutineFunc[ContextWithValue], error) {
+	ph(INFO, fmt.Sprintf("╰-With Context Step A for counter: %d", ctx.counter))
 	ctx.counter++
-	fmt.Println("  ╰-Counter is now: ", ctx.counter)
+	ph(INFO, fmt.Sprintf(" ╰-Counter is now: %d", ctx.counter))
 	if ctx.counter >= COUNTER_LIMIT {
 		return nil, nil
 	}
@@ -79,8 +83,8 @@ func WithContextLoopStep(ctx *ContextWithValue) (RoutineFunc[ContextWithValue], 
 }
 
 func TestRoutineWithContext(t *testing.T) {
-	routine := InitRoutine(WithContextLoopStep, ContextWithValue{counter: 0})
-	fmt.Println("Running routine with context")
+	routine := InitRoutine(WithContextLoopStep, ContextWithValue{counter: 0}, printHandler)
+	printHandler(INFO, "Running routine with context")
 	err := routine.Run()
 	if err != nil {
 		t.Error(err)

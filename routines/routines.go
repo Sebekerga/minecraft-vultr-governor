@@ -1,18 +1,37 @@
 package routines
 
+type PrintLevel int
+
+const (
+	INFO PrintLevel = iota
+	ERROR
+)
+
+func (pl PrintLevel) String() string {
+	return [...]string{"INFO", "ERROR"}[pl]
+}
+
+// PrintHandler is a function that can be used to handle messages from routines.
+type PrintHandler = func(PrintLevel, string)
+
 // Routine function that either returns handler for next step or nil if finished.
 // If error occurred during execution, it should be returned.
-type RoutineFunc[C any] func(*C) (RoutineFunc[C], error)
+type RoutineFunc[C any] func(*C, PrintHandler) (RoutineFunc[C], error)
 
 // Routine is a simple routine executor.
 type Routine[C any] struct {
 	QueuedFunction RoutineFunc[C]
 	Context        C
+	PrintHandler   PrintHandler
 }
 
 // InitRoutine initializes a new routine with entry function and starting context.
-func InitRoutine[C any](entryFunction RoutineFunc[C], starting_context C) Routine[C] {
-	routine := Routine[C]{QueuedFunction: entryFunction, Context: starting_context}
+func InitRoutine[C any](entryFunction RoutineFunc[C], startingContext C, printHandler PrintHandler) Routine[C] {
+	routine := Routine[C]{
+		QueuedFunction: entryFunction,
+		Context:        startingContext,
+		PrintHandler:   printHandler,
+	}
 	return routine
 }
 
@@ -23,12 +42,12 @@ func (r *Routine[C]) Finished() bool {
 
 // Step executes the next step in the routine.
 func (r *Routine[C]) Step() error {
-	next_func, err := r.QueuedFunction(&r.Context)
+	nextFunc, err := r.QueuedFunction(&r.Context, r.PrintHandler)
 	if err != nil {
 		return err
 	}
 
-	r.QueuedFunction = next_func
+	r.QueuedFunction = nextFunc
 	return nil
 }
 
