@@ -14,8 +14,6 @@ import (
 	"github.com/vultr/govultr/v3"
 )
 
-const MAX_ATTEMPTS = 5
-
 type CreatingServerContext struct {
 	VCtx        context.Context
 	VultrClient *govultr.Client
@@ -102,6 +100,36 @@ func _CreateInstance(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	ctx.createdInstanceIP = instance.MainIP
 	ph(routines.INFO, fmt.Sprintf("Instance created, ID: %s", ctx.createdInstanceID))
 
+	return _WaitForInstanceToBeCreated, nil
+}
+
+func _WaitForInstanceToBeCreated(ctx *Ctx, ph routines.PrintHandler) (F, error) {
+
+	const MAX_ATTEMPTS = 10
+	const ACTION_ID = "wait_for_instance"
+
+	if ctx.attemptCounter.Get(ACTION_ID) <= 0 {
+		ph(routines.INFO, "Waiting for instance to be created")
+	}
+
+	instance, _, err := ctx.VultrClient.Instance.Get(ctx.VCtx, ctx.createdInstanceID)
+	if err != nil {
+		ph(routines.ERROR, "Error occurred while fetching instance")
+		return nil, err
+	}
+
+	if instance.Status != "active" || instance.PowerStatus != "running" || instance.ServerStatus != "ok" {
+		ctx.attemptCounter.Increment(ACTION_ID)
+		ph(routines.INFO, fmt.Sprintf("Attempt %d: Instance not active yet", ctx.attemptCounter.Get(ACTION_ID)))
+		if ctx.attemptCounter.Get(ACTION_ID) >= MAX_ATTEMPTS {
+			ph(routines.ERROR, "Max attempts reached")
+			return nil, fmt.Errorf("max attempts reached")
+		}
+		time.Sleep(10 * time.Second)
+		return _WaitForInstanceToBeCreated, nil
+	}
+
+	ph(routines.INFO, "Instance active")
 	return _FindBlockStorage, nil
 }
 
