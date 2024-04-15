@@ -29,11 +29,11 @@ type CreatingServerContext struct {
 	TargetScriptID       string
 	TargetBlockLabel     string
 
-	CreatedInstanceID string
-	CreatedInstanceIP string
-	TargetBlockID     string
+	createdInstanceID string
+	createdInstanceIP string
+	targetBlockID     string
 
-	AttemptCount int
+	attemptCounter routines.AttemptCounter
 }
 
 func InitContext(vultrContext context.Context, vultrClient *govultr.Client) CreatingServerContext {
@@ -53,7 +53,7 @@ func InitContext(vultrContext context.Context, vultrClient *govultr.Client) Crea
 		TargetScriptID:       os.Getenv(mcvultrgov.TARGET_SCRIPT_ID_KEY),
 		TargetBlockLabel:     os.Getenv(mcvultrgov.TARGET_BLOCK_LABEL_KEY),
 
-		AttemptCount: 0,
+		attemptCounter: routines.NewAttemptCounter(),
 	}
 }
 
@@ -61,10 +61,11 @@ type Ctx = CreatingServerContext
 type F = routines.RoutineFunc[Ctx]
 
 func CreatingServerEntry(ctx *Ctx, ph routines.PrintHandler) (F, error) {
-	return _CheckIfInstanceCreated, nil
+	return _CheckIfInstanceExists, nil
 }
 
-func _CheckIfInstanceCreated(ctx *Ctx, ph routines.PrintHandler) (F, error) {
+func _CheckIfInstanceExists(ctx *Ctx, ph routines.PrintHandler) (F, error) {
+
 	instances, _, _, err := ctx.VultrClient.Instance.List(ctx.VCtx, &govultr.ListOptions{})
 	if err != nil {
 		ph(routines.ERROR, "Error occurred while fetching instances")
@@ -73,9 +74,9 @@ func _CheckIfInstanceCreated(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 
 	for _, instance := range instances {
 		if instance.Label == ctx.TargetInstanceLabel {
-			ctx.CreatedInstanceID = instance.ID
-			ctx.CreatedInstanceIP = instance.MainIP
-			ph(routines.INFO, fmt.Sprintf("Found existing instance, ID: %s", ctx.CreatedInstanceID))
+			ctx.createdInstanceID = instance.ID
+			ctx.createdInstanceIP = instance.MainIP
+			ph(routines.INFO, fmt.Sprintf("Found existing instance, ID: %s", ctx.createdInstanceID))
 			return _FindBlockStorage, nil
 		}
 	}
@@ -97,9 +98,9 @@ func _CreateInstance(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 		ph(routines.ERROR, "Error occurred while creating instance")
 		return nil, err
 	}
-	ctx.CreatedInstanceID = instance.ID
-	ctx.CreatedInstanceIP = instance.MainIP
-	ph(routines.INFO, fmt.Sprintf("Instance created, ID: %s", ctx.CreatedInstanceID))
+	ctx.createdInstanceID = instance.ID
+	ctx.createdInstanceIP = instance.MainIP
+	ph(routines.INFO, fmt.Sprintf("Instance created, ID: %s", ctx.createdInstanceID))
 
 	return _FindBlockStorage, nil
 }
@@ -114,8 +115,8 @@ func _FindBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 
 	for _, block := range blocks {
 		if block.Label == ctx.TargetBlockLabel {
-			ctx.TargetBlockID = block.ID
-			ph(routines.INFO, fmt.Sprintf("Found existing block storage, ID: %s", ctx.TargetBlockID))
+			ctx.targetBlockID = block.ID
+			ph(routines.INFO, fmt.Sprintf("Found existing block storage, ID: %s", ctx.targetBlockID))
 			return _AwaitServerSSH, nil
 		}
 	}
@@ -134,15 +135,19 @@ func _CreateBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 		ph(routines.ERROR, "Error occurred while creating block storage")
 		return nil, err
 	}
-	ctx.TargetBlockID = block.ID
-	ph(routines.INFO, fmt.Sprintf("Block storage created, ID: %s", ctx.TargetBlockID))
+	ctx.targetBlockID = block.ID
+	ph(routines.INFO, fmt.Sprintf("Block storage created, ID: %s", ctx.targetBlockID))
 
 	return _AwaitServerSSH, nil
 }
 
 func _AwaitServerSSH(ctx *Ctx, ph routines.PrintHandler) (F, error) {
-	if ctx.AttemptCount <= 0 {
-		ph(routines.INFO, fmt.Sprintf("Waiting for server SSH, IP: %s", ctx.CreatedInstanceIP))
+
+	const MAX_ATTEMPTS = 5
+	const ACTION_ID = "await_server_ssh"
+
+	if ctx.attemptCounter.Get(ACTION_ID) <= 0 {
+		ph(routines.INFO, fmt.Sprintf("Waiting for server SSH, IP: %s", ctx.createdInstanceIP))
 	}
 
 	keyPath := os.Getenv(mcvultrgov.INSTANCE_SSH_KEY_PATH_KEY)
@@ -154,12 +159,12 @@ func _AwaitServerSSH(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	ph(routines.INFO, "Loaded key")
 
 	// I cant know host key before server is booted
-	sshClient, err := goph.NewUnknown("root", ctx.CreatedInstanceIP, auth)
+	sshClient, err := goph.NewUnknown("root", ctx.createdInstanceIP, auth)
 	if err != nil {
-		ph(routines.INFO, fmt.Sprintf("Attempt %d: Server not booted yet", ctx.AttemptCount+1))
 		log.Printf("Error: %s", err)
-		ctx.AttemptCount++
-		if ctx.AttemptCount >= MAX_ATTEMPTS {
+		ctx.attemptCounter.Increment(ACTION_ID)
+		ph(routines.INFO, fmt.Sprintf("Attempt %d: Server not booted yet", ctx.attemptCounter.Get(ACTION_ID)))
+		if ctx.attemptCounter.Get(ACTION_ID) >= MAX_ATTEMPTS {
 			ph(routines.ERROR, "Max attempts reached")
 			return nil, err
 		}
@@ -170,14 +175,13 @@ func _AwaitServerSSH(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	ctx.SSHClient = sshClient
 
 	ph(routines.INFO, "SSH connection established")
-	ctx.AttemptCount = 0
 	return _AttachBlockStorage, nil
 }
 
 func _AttachBlockStorage(ctx *Ctx, ph routines.PrintHandler) (F, error) {
 	ph(routines.INFO, "Attaching block storage")
-	err := ctx.VultrClient.BlockStorage.Attach(ctx.VCtx, ctx.TargetBlockID, &govultr.BlockStorageAttach{
-		InstanceID: ctx.CreatedInstanceID,
+	err := ctx.VultrClient.BlockStorage.Attach(ctx.VCtx, ctx.targetBlockID, &govultr.BlockStorageAttach{
+		InstanceID: ctx.createdInstanceID,
 		Live:       govultr.BoolToBoolPtr(true),
 	})
 	if err != nil {
