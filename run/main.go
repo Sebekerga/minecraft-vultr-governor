@@ -10,6 +10,7 @@ import (
 	routines_create "sebekerga/vultr_minecraft_governor/routines/createserver"
 	routines_remove "sebekerga/vultr_minecraft_governor/routines/removeserver"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -52,13 +53,16 @@ func main() {
 	vultrClient := govultr.NewClient(oauth2.NewClient(ctx, ts))
 	log.Println("Connected to Vultr")
 
+	const DISPLAY_WIDTH = 90
+	upperBorder := fmt.Sprintf("╭%s", strings.Repeat("-", DISPLAY_WIDTH-1))
+	lowerBorder := fmt.Sprintf("╰%s", strings.Repeat("-", DISPLAY_WIDTH-1))
 	printHandler := func(tgMessage *tele.Message, messageStack *[]string, level routines.PrintLevel, message string) {
 		log.Printf("[%s] %s", level, strings.Replace(message, "\n", " ", -1))
 		switch level {
 		case routines.INFO:
-			*messageStack = append(*messageStack, fmt.Sprintf("OK > %s", message))
+			*messageStack = append(*messageStack, fmt.Sprintf("| OK > %s", message))
 		case routines.ERROR:
-			*messageStack = append(*messageStack, fmt.Sprintf("ERROR > %s", message))
+			*messageStack = append(*messageStack, fmt.Sprintf("| ERROR > %s", message))
 		}
 
 		if len(*messageStack) > ROUTINE_LOG_SIZE {
@@ -67,16 +71,29 @@ func main() {
 
 		filledMessageStack := make([]string, ROUTINE_LOG_SIZE-len(*messageStack))
 		for i := range filledMessageStack {
-			filledMessageStack[i] = "> "
+			filledMessageStack[i] = "| "
 		}
 
-		messageText := fmt.Sprintf("\n```routine_log\n%s\n```", strings.Join(append(*messageStack, filledMessageStack...), "\n"))
+		messageText := fmt.Sprintf(
+			"\n```routine_log\n%s\n%s\n%s\n```",
+			upperBorder,
+			strings.Join(append(*messageStack, filledMessageStack...), "\n"),
+			lowerBorder,
+		)
 		b.Edit(tgMessage, messageText, &tele.SendOptions{
 			ParseMode: tele.ModeMarkdownV2,
 		})
 	}
 
+	actionLock := atomic.Bool{}
+
 	b.Handle("/create", func(c tele.Context) error {
+		if actionLock.Load() {
+			c.Reply("Another action is in progress")
+			return nil
+		}
+		actionLock.Store(true)
+
 		botMessage, err := b.Reply(c.Message(), "Starting server")
 		if err != nil {
 			return err
@@ -90,10 +107,17 @@ func main() {
 		creationCtx := routines_create.InitContext(ctx, vultrClient)
 		routine := routines.InitRoutine[routines_create.Ctx](routines_create.CreatingServerEntry, creationCtx, thisPrintHandler)
 
-		return routine.Run()
+		res := routine.Run()
+		actionLock.Store(false)
+		return res
 	})
 
 	b.Handle("/remove", func(c tele.Context) error {
+		if actionLock.Load() {
+			c.Reply("Another action is in progress")
+			return nil
+		}
+
 		botMessage, err := b.Reply(c.Message(), "Stopping server")
 		if err != nil {
 			return err
@@ -106,7 +130,9 @@ func main() {
 		removingCtx := routines_remove.InitContext(ctx, vultrClient)
 		routine := routines.InitRoutine[routines_remove.Ctx](routines_remove.RemovingServerEntry, removingCtx, thisPrintHandler)
 
-		return routine.Run()
+		res := routine.Run()
+		actionLock.Store(false)
+		return res
 	})
 
 	log.Println("Starting bot")
