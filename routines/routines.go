@@ -1,5 +1,12 @@
 package routines
 
+import (
+	"log"
+	"reflect"
+	"runtime"
+	"strings"
+)
+
 type PrintLevel int
 
 const (
@@ -54,6 +61,11 @@ func (r *Routine[C]) Step() error {
 // Run executes the routine until it's finished or error occurs.
 func (r *Routine[C]) Run() error {
 	for !r.Finished() {
+		routineStepName := runtime.FuncForPC(reflect.ValueOf(r.QueuedFunction).Pointer()).Name()
+		routineStepNameSlice := strings.Split(routineStepName, "/")
+		routineStepName = routineStepNameSlice[len(routineStepNameSlice)-1]
+
+		log.Printf("Running routine step %s", routineStepName)
 		err := r.Step()
 		if err != nil {
 			return err

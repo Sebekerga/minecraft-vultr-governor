@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
-	"runtime"
 	mc_vultr_gov "sebekerga/vultr_minecraft_governor"
 	routines "sebekerga/vultr_minecraft_governor/routines"
 	routines_create "sebekerga/vultr_minecraft_governor/routines/createserver"
@@ -21,10 +19,6 @@ import (
 )
 
 const ROUTINE_LOG_SIZE = 10
-
-func GetFunctionName(i interface{}) string {
-	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
-}
 
 func main() {
 
@@ -76,7 +70,7 @@ func main() {
 			filledMessageStack[i] = "> "
 		}
 
-		messageText := fmt.Sprintf("Starting server\n```routine_log\n%s\n```", strings.Join(append(*messageStack, filledMessageStack...), "\n"))
+		messageText := fmt.Sprintf("\n```routine_log\n%s\n```", strings.Join(append(*messageStack, filledMessageStack...), "\n"))
 		b.Edit(tgMessage, messageText, &tele.SendOptions{
 			ParseMode: tele.ModeMarkdownV2,
 		})
@@ -96,19 +90,7 @@ func main() {
 		creationCtx := routines_create.InitContext(ctx, vultrClient)
 		routine := routines.InitRoutine[routines_create.Ctx](routines_create.CreatingServerEntry, creationCtx, thisPrintHandler)
 
-		for !routine.Finished() {
-			routineStepName := GetFunctionName(routine.QueuedFunction)
-			routineStepNameSlice := strings.Split(routineStepName, "/")
-			routineStepName = routineStepNameSlice[len(routineStepNameSlice)-1]
-
-			log.Printf("Running routine step %s", routineStepName)
-			err := routine.Step()
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
+		return routine.Run()
 	})
 
 	b.Handle("/remove", func(c tele.Context) error {
@@ -124,19 +106,7 @@ func main() {
 		removingCtx := routines_remove.InitContext(ctx, vultrClient)
 		routine := routines.InitRoutine[routines_remove.Ctx](routines_remove.RemovingServerEntry, removingCtx, thisPrintHandler)
 
-		for !routine.Finished() {
-			routineStepName := GetFunctionName(routine.QueuedFunction)
-			routineStepNameSlice := strings.Split(routineStepName, "/")
-			routineStepName = routineStepNameSlice[len(routineStepNameSlice)-1]
-
-			log.Printf("Running routine step %s", routineStepName)
-			err := routine.Step()
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
+		return routine.Run()
 	})
 
 	log.Println("Starting bot")
