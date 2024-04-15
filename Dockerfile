@@ -6,9 +6,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY *.go ./
+COPY ./ ./
 
-RUN go build -o /mc-vultr-gov
+RUN go build -o /mc-vultr-gov ./run
 RUN chmod +x /mc-vultr-gov
 RUN touch /.env
 CMD ["/mc-vultr-gov"]

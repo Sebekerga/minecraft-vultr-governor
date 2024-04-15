@@ -30,7 +30,7 @@ func main() {
 
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file: ", err)
+		log.Printf("Error loading .env file: %s", err)
 	}
 
 	tgToken := os.Getenv(mc_vultr_gov.TELEGRAM_TOKEN_KEY)
